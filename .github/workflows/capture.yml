@@ -92,7 +92,7 @@ jobs:
           gh release view archive >/dev/null 2>&1 || \
             gh release create archive \
               --title "Weekly archive" \
-              --notes "One asset per captured week, keyed by Scryfall id, prices in whole cents. See the README for the format." \
+              --notes "Working data for the Binderlyst app. Not a service; see the README." \
               --latest=false
           gh release upload archive "${files[@]}" data/manifest.json --clobber
 
@@ -111,6 +111,6 @@ jobs:
           gh release view bundle >/dev/null 2>&1 || \
             gh release create bundle \
               --title "Current bundle" \
-              --notes "The last 12 weeks in one file. Stable URL: https://github.com/Binderlyst/price-history/releases/latest/download/prices-12w.jsonl.gz" \
+              --notes "Working data for the Binderlyst app. Not a service; see the README." \
               --latest
           gh release upload bundle data/bundle/prices-12w.jsonl.gz --clobber
