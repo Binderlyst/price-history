@@ -1,0 +1,116 @@
+# Weekly price capture.
+#
+# Price history is otherwise unavailable — Scryfall publishes none, MTGJSON's
+# window reaches 90 days — so anything not captured inside that window cannot be
+# obtained again. This runs on GitHub's machines rather than anyone's PC for
+# that reason.
+#
+# Two releases:
+#   archive  every weekly point ever captured, plus the manifest
+#   bundle   the last 12 weeks in one file, marked latest so it has a stable
+#            download URL for the app
+#
+# Release assets sit outside git history, so the archive can grow for years
+# without bloating a clone. The manifest is fetched first because the runner
+# starts with an empty disk; without it every run would rebuild every point.
+#
+# capture.mjs reads the 90-day file, so a failed run costs nothing: the next run
+# sees the hole and fills it. Twelve consecutive failures would be needed before
+# a week was actually lost.
+#
+# Note: GitHub disables scheduled workflows after 60 days of repository
+# inactivity. The weekly release upload does not count, so if this repository
+# goes quiet for two months the schedule needs re-enabling in the Actions tab.
+name: Capture
+
+on:
+  schedule:
+    # 06:00 UTC every Monday. MTGJSON rebuilds in the early hours, so this reads
+    # a finished file rather than one mid-build.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: capture
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Fetch the archive manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Absent on the very first run, which is exactly when a full backfill is
+        # what we want.
+        run: |
+          mkdir -p data
+          gh release download archive --pattern manifest.json --dir data 2>/dev/null \
+            && node -e "const m=require('./data/manifest.json');console.log('archive holds',m.count,'points,',m.first,'->',m.last)" \
+            || echo "no manifest yet — first run, will backfill"
+
+      - name: Capture
+        run: node capture.mjs
+
+      - name: Check what was written
+        # A truncated download would otherwise be filed as a genuine week and
+        # quietly corrupt the series.
+        run: |
+          shopt -s nullglob
+          files=(data/points/*.jsonl.gz)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "nothing new"
+            exit 0
+          fi
+          for f in "${files[@]}"; do
+            size=$(stat -c%s "$f")
+            rows=$(gzip -dc "$f" | wc -l)
+            echo "$f — $rows rows, $size bytes"
+            if [ "$rows" -lt 50000 ] || [ "$size" -lt 1000000 ]; then
+              echo "::error::$f looks truncated ($rows rows, $size bytes)"
+              exit 1
+            fi
+          done
+
+      - name: Publish the new points
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          files=(data/points/*.jsonl.gz)
+          [ ${#files[@]} -eq 0 ] && exit 0
+          gh release view archive >/dev/null 2>&1 || \
+            gh release create archive \
+              --title "Weekly archive" \
+              --notes "One asset per captured week, keyed by Scryfall id, prices in whole cents. See the README for the format." \
+              --latest=false
+          gh release upload archive "${files[@]}" data/manifest.json --clobber
+
+      - name: Rebuild the bundle the app downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Needs the twelve newest points, not just the one this run wrote, and
+        # not the whole archive either: that grows by 2.9 MB a week forever, and
+        # pulling all of it back down every Monday would be pointless traffic.
+        run: |
+          for d in $(node -e "const m=require('./data/manifest.json');console.log(Object.keys(m.points).sort().slice(-12).join(' '))"); do
+            [ -f "data/points/$d.jsonl.gz" ] || gh release download archive --pattern "$d.jsonl.gz" --dir data/points
+          done
+          node bundle.mjs --weeks=12
+          test -s data/bundle/prices-12w.jsonl.gz
+          gh release view bundle >/dev/null 2>&1 || \
+            gh release create bundle \
+              --title "Current bundle" \
+              --notes "The last 12 weeks in one file. Stable URL: https://github.com/Binderlyst/price-history/releases/latest/download/prices-12w.jsonl.gz" \
+              --latest
+          gh release upload bundle data/bundle/prices-12w.jsonl.gz --clobber
