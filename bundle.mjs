@@ -95,24 +95,42 @@ async function main() {
   }
   for (const date of dates) cards.delete(date);
 
-  // A card is only worth shipping if it has a price on every week: a line with
-  // holes cannot be drawn honestly, and a card that appears halfway through
-  // would make a deck's total jump for no reason.
+  // Two things travel per card, and the difference matters:
+  //
+  //   * a weekly series, only when the card is priced in EVERY week. A line
+  //     with holes cannot be drawn honestly, and a card that appeared half way
+  //     along would make a deck's total jump for no reason.
+  //   * its latest price, always. A card too new to have a series still has a
+  //     price today, and an app that knows it can hold the card flat across the
+  //     window instead of counting it as worth nothing. Leaving this out made
+  //     recent printings — which are often the expensive ones — vanish from any
+  //     total the app could not price itself.
   const out = [];
-  let dropped = 0;
+  let withSeries = 0;
+  let priceOnly = 0;
   for (const [id, entry] of cards) {
-    const main = entry[fields[0]];
-    if (main.some((v) => !v)) {
-      dropped++;
-      continue;
-    }
-    if (MIN && Math.max(...main) < MIN) {
-      dropped++;
-      continue;
-    }
     const row = { id };
+    const now = {};
+    let any = false;
     for (const f of fields) {
-      if (entry[f].some((v) => v)) row[f] = entry[f];
+      const series = entry[f];
+      const last = series[series.length - 1];
+      if (last) any = true;
+      // Every week priced, and above the floor if one was asked for.
+      if (!series.some((v) => !v) && (!MIN || Math.max(...series) >= MIN)) {
+        row[f] = series;
+      } else if (last) {
+        // Only where there is no series to read it from: for a card that has
+        // one, the latest price is its last value, and repeating it cost 1.6 MB.
+        now[f] = last;
+      }
+    }
+    if (!any) continue;
+    if (Object.keys(now).length) row.now = now;
+    if (fields.some((f) => row[f])) {
+      withSeries++;
+    } else {
+      priceOnly++;
     }
     out.push(row);
   }
@@ -131,7 +149,7 @@ async function main() {
   // cleanly rather than misread. Every row after this line is one card.
   const header =
     JSON.stringify({
-      version: 1,
+      version: 2,
       source: 'mtgjson',
       licence: 'MIT, https://mtgjson.com/license/',
       dates,
@@ -149,7 +167,7 @@ async function main() {
     createGzip({ level: 9 }),
     createWriteStream(path)
   );
-  log(`  ${out.length.toLocaleString()} cards kept, ${dropped.toLocaleString()} dropped (gaps or below floor)`);
+  log(`  ${out.length.toLocaleString()} cards: ${withSeries.toLocaleString()} with a full series, ${priceOnly.toLocaleString()} with today's price only`);
   log(`  ${name}  ${mb(statSync(path).size)}`);
 }
 
