@@ -97,41 +97,81 @@ async function main() {
 
   // Two things travel per card, and the difference matters:
   //
-  //   * a weekly series, only when the card is priced in EVERY week. A line
-  //     with holes cannot be drawn honestly, and a card that appeared half way
-  //     along would make a deck's total jump for no reason.
-  //   * its latest price, always. A card too new to have a series still has a
-  //     price today, and an app that knows it can hold the card flat across the
-  //     window instead of counting it as worth nothing. Leaving this out made
-  //     recent printings — which are often the expensive ones — vanish from any
-  //     total the app could not price itself.
+  //   * a weekly series: the longest unbroken run of priced weeks ending at the
+  //     most recent one. Usually that is the whole window. For a printing that
+  //     came out part way along it is the weeks since it did, and sending those
+  //     is the difference between a recent card showing a movement and showing
+  //     nothing at all. What never travels is a line with holes in it, because
+  //     there is no honest way to draw one.
+  //
+  //     A short series is always the TAIL of the window, so the weeks it is
+  //     missing are always the earliest ones and the reader can work out which
+  //     dates it covers from its length alone. Nothing else would be safe: the
+  //     app pairs prices with dates from the end backwards.
+  //
+  //     Two points is the floor. One price is a price, not a movement.
+  //
+  //   * its latest price, whenever there is no series to read it from. A card
+  //     too new to have even two points still has a price today, and an app
+  //     that knows it can hold the card flat across the window instead of
+  //     counting it as worth nothing. Leaving this out made recent printings,
+  //     which are often the expensive ones, vanish from any total the app could
+  //     not price itself.
+  //
+  // Older builds of the app skip any series that is not exactly one value per
+  // week, so a short one reads to them as no series at all: they carry on using
+  // the latest price, exactly as they do today. That is why this needs no
+  // version bump, and it must stay true of anything added here.
+
+  // How many weeks at the end of [series] are priced without a gap.
+  const tailLength = (series) => {
+    let n = 0;
+    for (let i = series.length - 1; i >= 0 && series[i]; i--) n++;
+    return n;
+  };
+
   const out = [];
-  let withSeries = 0;
+  let full = 0;
+  let partial = 0;
   let priceOnly = 0;
   for (const [id, entry] of cards) {
     const row = { id };
     const now = {};
     let any = false;
+    let shortest = Infinity;
     for (const f of fields) {
       const series = entry[f];
       const last = series[series.length - 1];
       if (last) any = true;
-      // Every week priced, and above the floor if one was asked for.
-      if (!series.some((v) => !v) && (!MIN || Math.max(...series) >= MIN)) {
-        row[f] = series;
+      const keep = tailLength(series);
+      const tail = keep === series.length ? series : series.slice(-keep);
+      // Enough of a run to show a movement, and above the floor if one was
+      // asked for.
+      if (keep >= 2 && (!MIN || Math.max(...tail) >= MIN)) {
+        row[f] = tail;
+        if (keep < shortest) shortest = keep;
+        // A PARTIAL series still carries the latest price, because older builds
+        // skip any series that is not one value per week and would otherwise be
+        // left with nothing at all for this card. Without this line, giving a
+        // recent printing a partial series would take its price away from every
+        // installed copy and send it back to counting the card as worthless,
+        // which is the very thing the price-only field was added to stop.
+        if (keep < series.length) now[f] = last;
       } else if (last) {
-        // Only where there is no series to read it from: for a card that has
-        // one, the latest price is its last value, and repeating it cost 1.6 MB.
+        // For a card with a FULL series the latest price is its last value, and
+        // repeating it for all of them cost 1.6 MB.
         now[f] = last;
       }
     }
     if (!any) continue;
-    if (Object.keys(now).length) row.now = now;
-    if (fields.some((f) => row[f])) {
-      withSeries++;
-    } else {
+    if (shortest === Infinity) {
       priceOnly++;
+    } else if (shortest === dates.length) {
+      full++;
+    } else {
+      partial++;
     }
+    if (Object.keys(now).length) row.now = now;
     out.push(row);
   }
 
@@ -167,7 +207,10 @@ async function main() {
     createGzip({ level: 9 }),
     createWriteStream(path)
   );
-  log(`  ${out.length.toLocaleString()} cards: ${withSeries.toLocaleString()} with a full series, ${priceOnly.toLocaleString()} with today's price only`);
+  log(
+    `  ${out.length.toLocaleString()} cards: ${full.toLocaleString()} with a full series, ` +
+      `${partial.toLocaleString()} with a partial one, ${priceOnly.toLocaleString()} with today's price only`
+  );
   log(`  ${name}  ${mb(statSync(path).size)}`);
 }
 
