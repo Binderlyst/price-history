@@ -59,14 +59,18 @@ const mb = (n) => (n / 1048576).toFixed(2) + ' MB';
 
 /// The weekly grid this run should end up owning, oldest first.
 ///
-/// Anchored on the newest date the feed carries and stepped backwards, so the
-/// spacing stays exactly seven days whether the job ran on time, ran late, or
-/// did not run for a month. Anchoring on "today" instead would drift the grid
-/// every time a run slipped.
-function grid(newest, weeks) {
+/// Anchored on the archive's newest point and stepped seven days either way,
+/// so a new point always lands exactly a week after the last one whatever day
+/// the feed happens to be on. It used to anchor on the feed's newest date, and
+/// the day the feed slipped from a Friday to a Sunday that started a second
+/// grid: the run backfilled thirteen "missing" Sundays on top of the Fridays it
+/// already held. On an empty archive there is nothing to anchor to, so the
+/// feed's newest date is used.
+function grid(anchor, oldest, newest, weeks) {
   const out = [];
-  for (let i = 0; i < weeks; i++) out.unshift(shiftDate(newest, -i * 7));
-  return out;
+  for (let d = anchor; d <= newest; d = shiftDate(d, 7)) out.push(d);
+  for (let d = shiftDate(anchor, -7); d >= oldest; d = shiftDate(d, -7)) out.unshift(d);
+  return out.slice(-weeks);
 }
 
 /// Days between two YYYY-MM-DD dates.
@@ -116,7 +120,8 @@ async function main() {
   // --repair also refills any point whose local file is missing, for the case
   // where the local copy has been pruned but the manifest still lists it.
   const known = new Set(Object.keys(readManifest().points ?? {}));
-  const wanted = grid(newest, WEEKS).filter((d) => d >= all[0]);
+  const anchor = [...known].sort().pop() ?? newest;
+  const wanted = grid(anchor, all[0], newest, WEEKS);
   const targets = FORCE
     ? wanted
     : wanted.filter((d) => !known.has(d) || (REPAIR && !hasPoint(d)));

@@ -1,7 +1,11 @@
 // Cuts the archive down to what a phone actually needs: one row per card
 // carrying that card's weekly prices, instead of one file per week.
 //
-//   node bundle.mjs [--weeks=12] [--currency=usd|eur|both] [--min=0]
+//   node bundle.mjs [--weeks=12] [--currency=usd|eur|both] [--min=0] [--list]
+//
+// --list only prints the dates a build would use, one per line, and writes
+// nothing. The workflow runs it first to know which points to fetch, so the
+// selection below is the single place that decides.
 //
 // The archive is stored a week at a time because that is how it is captured and
 // it makes each write append-only. A phone wants the opposite shape — give me
@@ -28,6 +32,7 @@ const args = Object.fromEntries(
 const WEEKS = Number.parseInt(args.weeks, 10) || 12;
 const CURRENCY = args.currency === true || !args.currency ? 'both' : String(args.currency);
 const MIN = Number.parseInt(args.min, 10) || 0;
+const LIST = !!args.list;
 
 const log = (m) => console.log(m);
 const mb = (n) => (n / 1048576).toFixed(2) + ' MB';
@@ -65,6 +70,10 @@ function weeklyDates(all, weeks) {
 async function main() {
   const manifest = readManifest();
   const dates = weeklyDates(Object.keys(manifest.points ?? {}).sort(), WEEKS);
+  if (LIST) {
+    for (const d of dates) console.log(d);
+    return;
+  }
   if (dates.length < 2) {
     log('Not enough points to bundle.');
     return;

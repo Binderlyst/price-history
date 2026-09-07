@@ -99,11 +99,14 @@ jobs:
       - name: Rebuild the bundle the app downloads
         env:
           GH_TOKEN: ${{ github.token }}
-        # Needs the twelve newest points, not just the one this run wrote, and
-        # not the whole archive either: that grows by 2.9 MB a week forever, and
-        # pulling all of it back down every Monday would be pointless traffic.
+        # Needs the twelve points the bundler will read, not just the one this
+        # run wrote, and not the whole archive either: that grows by 2.9 MB a
+        # week forever, and pulling all of it back down every Monday would be
+        # pointless traffic. The bundler picks its own dates (a week apart, so
+        # not simply the newest twelve when the archive holds extras), so ask it
+        # which ones rather than guess.
         run: |
-          for d in $(node -e "const m=require('./data/manifest.json');console.log(Object.keys(m.points).sort().slice(-12).join(' '))"); do
+          for d in $(node bundle.mjs --weeks=12 --list); do
             [ -f "data/points/$d.jsonl.gz" ] || gh release download archive --pattern "$d.jsonl.gz" --dir data/points
           done
           node bundle.mjs --weeks=12
