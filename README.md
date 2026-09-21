@@ -21,6 +21,7 @@ node capture.mjs    # fill in any weekly points the archive is missing
 node bundle.mjs     # cut the file the app downloads
 node check.mjs      # non-zero exit if the newest point is stale
 node report.mjs     # local page showing what the data looks like
+node set-sizes.mjs  # cut the per-set card counts the app downloads
 ```
 
 `capture.mjs` runs weekly as a GitHub Action here. It reads MTGJSON's 90-day

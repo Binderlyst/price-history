@@ -117,3 +117,14 @@ jobs:
               --notes "Working data for the Binderlyst app. Not a service; see the README." \
               --latest
           gh release upload bundle data/bundle/prices-12w.jsonl.gz --clobber
+
+      - name: Cut the set sizes the app downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Exact per-set card counts from AllPrintings (already in the cache when
+        # the capture ran; fetched otherwise), so the app never has to search
+        # Scryfall for them. Rides on the same release as the bundle.
+        run: |
+          node set-sizes.mjs
+          test -s data/bundle/set-sizes.json
+          gh release upload bundle data/bundle/set-sizes.json --clobber
