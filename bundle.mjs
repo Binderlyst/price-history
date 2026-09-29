@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { DATA_DIR, pointPath, readManifest } from './lib/points.mjs';
+import { cleanSeries } from './lib/eurclean.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -103,6 +104,19 @@ async function main() {
     log(`  read ${dates[w]}`);
   }
   for (const date of dates) cards.delete(date);
+
+  // MTGJSON's one-week euro glitches, put right before anything is cut from
+  // the series (see lib/eurclean.mjs).
+  let glitches = 0;
+  for (const entry of cards.values()) {
+    for (const f of ['eur', 'eurFoil']) {
+      if (!entry[f]) continue;
+      const { series, fixed } = cleanSeries(entry[f]);
+      entry[f] = series;
+      glitches += fixed;
+    }
+  }
+  log(`  ${glitches.toLocaleString()} one-week euro glitches put right`);
 
   // Two things travel per card, and the difference matters:
   //
