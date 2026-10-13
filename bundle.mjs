@@ -23,6 +23,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { DATA_DIR, pointPath, readManifest } from './lib/points.mjs';
 import { cleanSeries } from './lib/eurclean.mjs';
+import { fillGaps } from './lib/gapfill.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).map((a) => {
@@ -105,6 +106,18 @@ async function main() {
   }
   for (const date of dates) cards.delete(date);
 
+  // A lone week with no price carries the week before, so one missing week in
+  // the feed does not cut a whole line short (see lib/gapfill.mjs).
+  let gaps = 0;
+  for (const entry of cards.values()) {
+    for (const f of fields) {
+      const { series, filled } = fillGaps(entry[f]);
+      entry[f] = series;
+      gaps += filled;
+    }
+  }
+  log(`  ${gaps.toLocaleString()} lone missing weeks filled`);
+
   // MTGJSON's one-week euro glitches, put right before anything is cut from
   // the series (see lib/eurclean.mjs).
   let glitches = 0;
@@ -125,7 +138,8 @@ async function main() {
   //     came out part way along it is the weeks since it did, and sending those
   //     is the difference between a recent card showing a movement and showing
   //     nothing at all. What never travels is a line with holes in it, because
-  //     there is no honest way to draw one.
+  //     there is no honest way to draw one. A lone missing week is filled
+  //     first (see above), so only a real gap cuts a line.
   //
   //     A short series is always the TAIL of the window, so the weeks it is
   //     missing are always the earliest ones and the reader can work out which
